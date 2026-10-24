@@ -8,12 +8,14 @@ from __future__ import annotations
 import numpy as np
 
 from .augment import augment_hand
-from .landmarks import hand_features
-from .sequences import augment_seq_sample, sequence_features
+from .landmarks import FEATURE_DIM, hand_features
+from .sequences import SEQ_FEATURE_DIM, SEQ_LEN, augment_seq_sample, sequence_features
 
 
 def static_batch(P: np.ndarray, idx, rng=None, augment: bool = False) -> np.ndarray:
     """P: (N, 21, 3) normalized hands. Returns (len(idx), FEATURE_DIM)."""
+    if len(idx) == 0:
+        return np.zeros((0, FEATURE_DIM), np.float32)
     if augment:
         return np.stack([hand_features(augment_hand(P[i], rng), already_normalized=True) for i in idx])
     return np.stack([hand_features(P[i], already_normalized=True) for i in idx])
@@ -21,6 +23,8 @@ def static_batch(P: np.ndarray, idx, rng=None, augment: bool = False) -> np.ndar
 
 def sequence_batch(samples: list, idx, rng=None, augment: bool = False) -> np.ndarray:
     """samples: list of build_sequence() dicts. Returns (len(idx), SEQ_LEN, SEQ_FEATURE_DIM)."""
+    if len(idx) == 0:
+        return np.zeros((0, SEQ_LEN, SEQ_FEATURE_DIM), np.float32)
     if augment:
         return np.stack([sequence_features(augment_seq_sample(samples[i], rng)) for i in idx])
     return np.stack([sequence_features(samples[i]) for i in idx])
