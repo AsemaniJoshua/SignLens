@@ -17,7 +17,7 @@ from .augment import augment_sequence, _rot
 from .landmarks import FEATURE_DIM, MIDDLE_MCP, WRIST, hand_features, normalize_hand
 
 SEQ_LEN = 32          # frames per sequence after resampling
-SEQ_FEATURE_DIM = FEATURE_DIM + 6   # hand shape + wrist position + velocity
+SEQ_FEATURE_DIM = FEATURE_DIM + 4   # hand shape + wrist path (x, y) + velocity (x, y)
 
 
 def _interp_fill(arr: np.ndarray, valid: np.ndarray) -> np.ndarray:
@@ -137,5 +137,6 @@ def sequence_features(sample: dict) -> np.ndarray:
     """(seq_len, SEQ_FEATURE_DIM) model input for one sequence."""
     hands, traj = sample["hands"], sample["traj"]
     shape = np.stack([hand_features(h, already_normalized=True) for h in hands])
-    vel = np.diff(traj, axis=0, prepend=traj[:1])
-    return np.concatenate([shape, traj, vel], axis=1).astype(np.float32)
+    path = traj[:, :2]                   # depth is always 0 (unreliable), so it is left out
+    vel = np.diff(path, axis=0, prepend=path[:1])
+    return np.concatenate([shape, path, vel], axis=1).astype(np.float32)

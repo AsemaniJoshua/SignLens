@@ -106,11 +106,21 @@ def tip_distances(p: np.ndarray) -> np.ndarray:
     return np.concatenate([pair, thumb]).astype(np.float32)
 
 
-FEATURE_DIM = N_LANDMARKS * 3 + 15 + 10 + 20  # = 108
+# The wrist is the origin (always 0, 0, 0), so it is left out of the coordinates:
+# a feature that never changes carries no information and breaks feature scaling.
+FEATURE_DIM = (N_LANDMARKS - 1) * 3 + 15 + 10 + 20  # = 105
 
 
 def hand_features(lm: np.ndarray, handedness: str | None = None,
                   aspect: float = 1.0, already_normalized: bool = False) -> np.ndarray:
-    """Full feature vector (108,) for one hand. Use this everywhere."""
+    """Full feature vector (105,) for one hand. Use this everywhere."""
     p = lm if already_normalized else normalize_hand(lm, handedness, aspect)
-    return np.concatenate([p.reshape(-1), joint_angles(p), tip_distances(p)]).astype(np.float32)
+    return np.concatenate([p[1:].reshape(-1), joint_angles(p), tip_distances(p)]).astype(np.float32)
+
+
+def scaling_stats(X: np.ndarray, min_std: float = 1e-2):
+    """Mean and variance for the model's input scaling layer, with a floor on
+    the spread. Without the floor, a feature that barely varies in the data
+    gets divided by ~0 and produces enormous inputs (the v2.0.0 training bug)."""
+    X = np.asarray(X, np.float64).reshape(-1, np.shape(X)[-1])
+    return X.mean(0).astype(np.float32), np.maximum(X.var(0), min_std ** 2).astype(np.float32)

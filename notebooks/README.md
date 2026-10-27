@@ -12,7 +12,7 @@ notebooks/
 ├── 03_train_motion_model.ipynb      J and Z (movement signs)
 ├── 04_image_cnn_baseline.ipynb      optional pixel-based CNN, for comparison in the paper
 ├── signlens_core/                   shared code used by notebooks AND the API
-│   ├── landmarks.py   hand normalization + 108 features  <- the single source of truth
+│   ├── landmarks.py   hand normalization + 105 features  <- the single source of truth
 │   ├── augment.py     geometric augmentation (training only)
 │   ├── sequences.py   motion clips: resampling, wrist path, generated "other" class
 │   ├── data.py        loaders, dataset format, leak-free grouped split

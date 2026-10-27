@@ -24,7 +24,7 @@ def fake_hand(seed=0):
     r = np.random.default_rng(seed)
     base = np.zeros((21, 3), np.float32)
     base[1:] = r.uniform(-0.1, 0.1, (20, 3))
-    base[9] = [0.0, -0.12, 0.0]  # middle knuckle above the wrist
+    base[9] = [r.uniform(-0.03, 0.03), -0.12, r.uniform(-0.02, 0.02)]  # middle knuckle above the wrist
     return base + [0.5, 0.6, 0.0]
 
 
@@ -56,6 +56,21 @@ def test_feature_shape_and_palm_unit():
     assert p.shape == (21, 3) and np.allclose(p[0], 0)
     assert abs(np.linalg.norm(p[9, :2]) - 1) < 1e-4
     assert sc.hand_features(fake_hand()).shape == (sc.FEATURE_DIM,)
+
+
+def test_no_constant_features_and_scaled_inputs_stay_bounded():
+    """Regression test for the v2.0.0 bug: the wrist coordinates were always 0,
+    Keras divided augmented values by ~0, and the network saw inputs of ~770,000."""
+    P = np.stack([sc.normalize_hand(fake_hand(i)) for i in range(60)])
+    clean = sc.batches.static_batch(P, range(len(P)))
+    aug = sc.batches.static_batch(P, range(len(P)), RNG, augment=True)
+    assert clean.shape[1] == sc.FEATURE_DIM
+    assert clean.var(0).min() > 1e-8, "a feature never changes"
+    keras_like = (aug - clean.mean(0)) / np.maximum(clean.std(0), 1e-7)
+    assert np.abs(keras_like).max() < 1000, np.abs(keras_like).max()
+    mean, var = sc.scaling_stats(clean)
+    assert np.all(var >= 1e-4)
+    assert np.allclose(sc.augment_hand(P[0], RNG)[0], 0), "wrist must stay at the origin"
 
 
 def test_augmentation_changes_but_stays_valid():

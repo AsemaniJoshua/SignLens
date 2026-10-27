@@ -49,6 +49,7 @@ def augment_hand(p: np.ndarray, rng: np.random.Generator,
     q = (q - q[WRIST]) @ R.T
     q = q * rng.uniform(0.95, 1.05)
     q = q + rng.normal(0.0, jitter, q.shape).astype(np.float32)
+    q = q - q[WRIST]                     # keep the wrist at the origin, as in real samples
     if rng.random() < mirror_p:
         q[:, 0] *= -1.0
     return q.astype(np.float32)
@@ -69,4 +70,5 @@ def augment_sequence(seq: np.ndarray, rng: np.random.Generator, **kw) -> np.ndar
         out.append(q)
     out = np.stack(out)
     out += rng.normal(0.0, jitter, out.shape).astype(np.float32)
+    out -= out[:, WRIST:WRIST + 1]       # wrist stays at the origin in every frame
     return out.reshape(len(seq), N_LANDMARKS, 3)
