@@ -1,0 +1,18 @@
+{
+  "labels": [
+    "J",
+    "Z",
+    "other"
+  ],
+  "model": "motion",
+  "seq_len": 32,
+  "feature_dim": 109,
+  "signlens_core": "2.1.0",
+  "real_clips_per_class": {
+    "J": 1,
+    "Z": 2
+  },
+  "reject_label": "other",
+  "motion_threshold_palms": 1.0,
+  "window_seconds": 1.5
+}

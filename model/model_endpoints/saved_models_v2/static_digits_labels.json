@@ -1,0 +1,25 @@
+{
+  "labels": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10"
+  ],
+  "model": "static_digits",
+  "feature_dim": 105,
+  "signlens_core": "2.1.0",
+  "min_confidence": 0.6,
+  "motion_labels": [
+    "J",
+    "Z"
+  ],
+  "test_accuracy_heldout_recordings": null,
+  "test_accuracy_heldout_sources": {}
+}

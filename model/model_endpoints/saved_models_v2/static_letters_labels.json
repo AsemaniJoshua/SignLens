@@ -1,0 +1,44 @@
+{
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y"
+  ],
+  "model": "static_letters",
+  "feature_dim": 105,
+  "signlens_core": "2.1.0",
+  "min_confidence": 0.6,
+  "motion_labels": [
+    "J",
+    "Z"
+  ],
+  "test_accuracy_heldout_recordings": 0.976925071298937,
+  "test_accuracy_heldout_sources": {
+    "asl-alphabet": 0.802415720209122,
+    "asl-alphabet-test": 0.9019033674963397,
+    "synthetic-asl-alphabet": 0.7922885572139303,
+    "webcam": 0.7523419203747073,
+    "youtube": 0.8783783783783784
+  }
+}
