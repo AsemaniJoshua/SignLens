@@ -253,6 +253,19 @@ def test_broken_tflite_is_refused():
         importlib.reload(inf)
 
 
+def test_motion_other_falls_back_to_static():
+    """When the hand moves but the motion model says 'other', show the static answer."""
+    with tempfile.TemporaryDirectory() as d:
+        lab = os.path.join(d, "s.json"); sc.save_labels(lab, ["A", "B"])
+        mlab = os.path.join(d, "m.json"); sc.save_labels(mlab, ["J", "Z", "other"])
+        pred = inference.SignPredictor(lambda x: np.tile([0.9, 0.1], (len(x), 1)), lab,
+                                       motion_model=lambda x: np.array([[0.05, 0.05, 0.9]]),
+                                       motion_labels=mlab, smooth=3)
+        out = [pred.update(fake_hand() + [0.03 * t, 0, 0], "Right", t / 30) for t in range(30)]
+        assert all(o["prediction"] in ("A", None) for o in out), {o["prediction"] for o in out}
+        assert out[-1]["prediction"] == "A" and out[-1]["model"] == "static"
+
+
 def test_predictor_with_dummy_model():
     with tempfile.TemporaryDirectory() as d:
         lab = os.path.join(d, "labels.json")

@@ -3,6 +3,7 @@ from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 from app.api_v1.auth import init_db
 from app.api_v1 import endpoints
+from app.models.signlens_service import service_status
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -12,7 +13,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="SignLens API",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -38,7 +39,7 @@ def custom_openapi():
                 "**Usage:**\n"
                 "1. Connect with query parameters `api_key` and `type`.\n"
                 "2. Send raw bytes of image frames (JPEG/PNG).\n"
-                "3. Receive JSON predictions in real-time.\n\n"
+                "3. Receive one JSON message per frame. Show a letter when `stable` is true.\n\n"
                 "*Note: This endpoint is not interactive in Swagger UI.*"
             ),
             "tags": ["Prediction"],
@@ -56,6 +57,13 @@ def custom_openapi():
                     "required": True,
                     "schema": {"type": "string", "enum": ["video", "stream"]},
                     "description": "Type of input source"
+                },
+                {
+                    "name": "mode",
+                    "in": "query",
+                    "required": False,
+                    "schema": {"type": "string", "enum": ["letters", "digits"], "default": "letters"},
+                    "description": "Which signs to recognise (letters and numbers are separate models)"
                 }
             ],
             "responses": {
@@ -74,16 +82,18 @@ app.openapi = custom_openapi
 # Include versioned API router
 app.include_router(endpoints.router, prefix="/api/v1")
 
-# Health check endpoint
+# Health check endpoint: also reports whether the v2 models are loaded
 @app.get("/", tags=["Health"])
 def health_check():
+    models = service_status()
     return {
-        "status": "ok",
-        "message": "SignLens API is running",
-        "version": "1.0.0",
+        "status": "ok" if models["ready"] else "models_missing",
+        "message": "SignLens API is running" if models["ready"] else models.get("error"),
+        "version": "2.0.0",
         "data": {
             "Supported input types": ["image", "video", "stream"],
+            "Modes": models.get("modes", []),
+            "Motion signs": models.get("motion_labels", []),
             "API documentation": "/docs",
-            "Rate limits": "100 requests per minute per API key (subject to change)"
         }
     }

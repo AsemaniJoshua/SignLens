@@ -63,14 +63,17 @@ def load_predict_fn(model_path: str):
 
 
 class SignPredictor:
-    def __init__(self, static_model: str, static_labels: str,
-                 motion_model: str | None = None, motion_labels: str | None = None,
+    def __init__(self, static_model, static_labels,
+                 motion_model=None, motion_labels=None,
                  min_conf: float = 0.6, smooth: int = 5, motion_window_s: float = 1.5,
                  motion_threshold: float = 1.0, aspect: float = 16 / 9):
-        self.static_fn = load_predict_fn(static_model)
-        self.static_labels = load_labels(static_labels)
-        self.motion_fn = load_predict_fn(motion_model) if motion_model else None
-        self.motion_labels = load_labels(motion_labels) if motion_labels else None
+        # Each model/labels argument may be a file path, or an already-loaded predict
+        # function / label list (so a server can load once and share across requests).
+        self.static_fn = static_model if callable(static_model) else load_predict_fn(static_model)
+        self.static_labels = list(static_labels) if not isinstance(static_labels, str) else load_labels(static_labels)
+        self.motion_fn = (motion_model if callable(motion_model) else load_predict_fn(motion_model)) if motion_model else None
+        self.motion_labels = ((list(motion_labels) if not isinstance(motion_labels, str) else load_labels(motion_labels))
+                              if motion_labels else None)
         self.min_conf, self.aspect = min_conf, aspect
         self.recent = deque(maxlen=smooth)
         self.buffer = deque()   # (time_s, landmarks or None)
@@ -110,7 +113,9 @@ class SignPredictor:
                 if path > self.motion_threshold:
                     p = self.motion_fn(sequence_features(seq)[None])[0]
                     k = int(np.argmax(p))
-                    result = {"prediction": self.motion_labels[k], "confidence": float(p[k]), "model": "motion"}
+                    # "other" = moving, but not a motion sign -> let the static model answer
+                    if self.motion_labels[k] != "other" and p[k] >= self.min_conf:
+                        result = {"prediction": self.motion_labels[k], "confidence": float(p[k]), "model": "motion"}
         if result is None:
             result = self.predict_landmarks(lm, handedness, aspect)
             result["model"] = "static"

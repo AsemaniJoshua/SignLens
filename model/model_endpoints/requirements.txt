@@ -1,12 +1,11 @@
+# SignLens model server (v2). TensorFlow is no longer needed: the .tflite
+# models run on ai-edge-litert (small). MediaPipe brings its own OpenCV.
 fastapi
-uvicorn
+uvicorn[standard]          # [standard] includes WebSocket support
 python-multipart
-pydantic
-opencv-python-headless==4.9.0.80
-tensorflow==2.13.0
-keras==2.13.1
-numpy<2
-mysql-connector-python
+pydantic>=2
+numpy
+mediapipe>=0.10.14
+ai-edge-litert
+mysql-connector-python     # API keys (app/api_v1/auth.py)
 python-dotenv
-protobuf<4
-mediapipe==0.10.5
