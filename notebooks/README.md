@@ -77,55 +77,57 @@ Notebook 01's last cell prints exactly which letters still need data.
 
 ## 5. Use the new models in the API
 
-The exported files (from `MyDrive/SignLens/models/`):
+The model server (`model/model_endpoints`) already uses the v2 models. Same URLs and response fields as before, so the mobile app keeps working.
 
-```
-static_letters_model.tflite   static_letters_labels.json
-static_digits_model.tflite    static_digits_labels.json     (if trained)
-motion_model.tflite           motion_labels.json
+**Set up (once):**
+
+1. Copy these from Google Drive (`MyDrive/SignLens/models/`) into `model/model_endpoints/saved_models_v2/`:
+   `static_letters_model.tflite`, `static_letters_labels.json`, and optionally the `static_digits_*` and `motion_*` files.
+2. Install and start, from `model/model_endpoints`:
+   ```bash
+   pip install -r requirements.txt
+   uvicorn app.main:app --host 0.0.0.0 --port 8000
+   ```
+3. Open `http://localhost:8000/`. It should say `"status": "ok"` and list the loaded modes.
+
+**What changed for the app:**
+
+| | before | now |
+|---|---|---|
+| `POST /api/v1/predict?type=image\|video` | old `.h5` models, wrong-letter bug | v2 models; optional `&mode=digits` |
+| no hand in the picture | a guessed letter | `"No hand detected. ..."` with confidence 0 |
+| unsure | sent to Gemini below 90% | `"Not sure ..."`; Gemini only if you turn it on |
+| live stream (WebSocket) | flickering raw guesses | smoothed; show a letter when `"stable": true` |
+| extra fields | | `mode`, `top3`, `reason` (the app can ignore them) |
+
+**Gemini fallback** is off by default. To turn it on, set `GEMINI_API_KEY` and `GEMINI_FALLBACK_BELOW=0.5`; answers from Gemini are marked `"fallback": true`.
+
+**Shared code:** the server has its own copy of `signlens_core` (Docker only sees `model/model_endpoints`). After changing `notebooks/signlens_core`, run `python model/model_endpoints/sync_signlens_core.py`. The server tests check that the copies match:
+
+```bash
+cd model/model_endpoints && python tests/test_service.py
 ```
 
-Replace the prediction code in `model/model_endpoints` with the shared predictor, so the API processes landmarks **exactly** like training did and reads labels from the JSON files:
+## Re-export a model without retraining
+
+`.tflite` files made before the export fix (commit `50cb148`) are about **10 KB** and output NaN; the predictor refuses them. The `.keras` files from those runs are fine. To rebuild the `.tflite` files from them, run this in any Colab notebook after its Setup cell (no retraining, about 1 minute):
 
 ```python
-# model/model_endpoints/app/models/signlens.py
-import os, sys
-import cv2, numpy as np
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-sys.path.insert(0, os.path.join(REPO, "notebooks"))
-from signlens_core import extract
-from signlens_core.inference import SignPredictor
-
-MODELS = os.path.join(os.path.dirname(__file__), "..", "..", "saved_models_v2")
-HAND_MODEL = extract.download_model(os.path.join(MODELS, "hand_landmarker.task"))
-LETTERS = SignPredictor(os.path.join(MODELS, "static_letters_model.tflite"),
-                        os.path.join(MODELS, "static_letters_labels.json"))
-
-def image_predict(file_bytes: bytes) -> dict:
-    img = cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
-    with extract.HandExtractor(HAND_MODEL) as ex:          # do NOT flip the image
-        lm, handed, _ = ex.from_image(img)
-    h, w = img.shape[:2]
-    return LETTERS.predict_landmarks(lm, handed, aspect=w / h)
-    # -> {"prediction": "A", "confidence": 0.97, "top3": [...]}  or prediction None if no hand
+import tempfile, numpy as np, tensorflow as tf, keras
+from signlens_core import inference
+for name in ("static_letters", "static_digits", "motion"):
+    k_path, t_path = f"{OUT_DIR}/{name}_model.keras", f"{OUT_DIR}/{name}_model.tflite"
+    if not os.path.exists(k_path):
+        continue
+    model = keras.models.load_model(k_path)
+    d = tempfile.mkdtemp() + "/saved_model"
+    model.export(d, format="tf_saved_model")
+    open(t_path, "wb").write(tf.lite.TFLiteConverter.from_saved_model(d).convert())
+    X = np.random.default_rng(0).normal(size=(50,) + tuple(model.input_shape[1:])).astype("float32")
+    k, l = model.predict(X, verbose=0), inference.load_predict_fn(t_path)(X)
+    print(f"{name}: {os.path.getsize(t_path)/1024:.0f} KB | max difference {np.abs(k - l).max():.1e} | "
+          f"same answer {np.mean(k.argmax(1) == l.argmax(1)):.0%}")
 ```
-
-For the WebSocket stream, create **one `SignPredictor` (with the motion model) and one `HandExtractor(video=True)` per connection**, and for every frame call `ex.from_frame(img, timestamp_ms)` then `predictor.update(lm, handed, t_seconds, aspect=w / h)`. It smooths over a few frames and switches to the motion model only when the hand is actually moving.
-
-Update `model_endpoints/requirements.txt` (TensorFlow is no longer needed to serve `.tflite` models):
-
-```
-fastapi
-uvicorn
-python-multipart
-pydantic
-numpy
-opencv-python-headless
-mediapipe>=0.10.20
-ai-edge-litert
-```
-
-Consider keeping the Gemini fallback only as an explicit, logged option. With the old 0.9 threshold, most answers came from Gemini rather than SignLens.
 
 ## 6. Test locally
 

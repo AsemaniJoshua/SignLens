@@ -40,11 +40,22 @@ def load_predict_fn(model_path: str):
         def f(x):
             x = np.asarray(x, np.float32)
             res = []
-            for row in x:  # tflite models are exported with batch size 1
+            for row in x:  # one sample at a time works for fixed and dynamic batch sizes
+                if tuple(inp["shape"]) != (1,) + row.shape:
+                    it.resize_tensor_input(inp["index"], (1,) + row.shape)
+                    it.allocate_tensors()
+                    inp.update(it.get_input_details()[0])
                 it.set_tensor(inp["index"], row[None])
                 it.invoke()
                 res.append(it.get_tensor(out["index"])[0])
             return np.stack(res)
+
+        # A broken export (e.g. one made before the v2.1 fix) outputs NaN. Refuse it loudly
+        # instead of returning meaningless predictions.
+        probe = np.zeros((1,) + tuple(int(d) for d in inp["shape"][1:]), np.float32)
+        if np.isnan(f(probe)).any():
+            raise ValueError(f"{model_path} outputs NaN: this .tflite export is broken. "
+                             "Re-export it from the .keras file (see notebooks/README.md) or load the .keras file.")
         return f
     import keras
     m = keras.models.load_model(model_path, compile=False)
@@ -52,14 +63,17 @@ def load_predict_fn(model_path: str):
 
 
 class SignPredictor:
-    def __init__(self, static_model: str, static_labels: str,
-                 motion_model: str | None = None, motion_labels: str | None = None,
+    def __init__(self, static_model, static_labels,
+                 motion_model=None, motion_labels=None,
                  min_conf: float = 0.6, smooth: int = 5, motion_window_s: float = 1.5,
                  motion_threshold: float = 1.0, aspect: float = 16 / 9):
-        self.static_fn = load_predict_fn(static_model)
-        self.static_labels = load_labels(static_labels)
-        self.motion_fn = load_predict_fn(motion_model) if motion_model else None
-        self.motion_labels = load_labels(motion_labels) if motion_labels else None
+        # Each model/labels argument may be a file path, or an already-loaded predict
+        # function / label list (so a server can load once and share across requests).
+        self.static_fn = static_model if callable(static_model) else load_predict_fn(static_model)
+        self.static_labels = list(static_labels) if not isinstance(static_labels, str) else load_labels(static_labels)
+        self.motion_fn = (motion_model if callable(motion_model) else load_predict_fn(motion_model)) if motion_model else None
+        self.motion_labels = ((list(motion_labels) if not isinstance(motion_labels, str) else load_labels(motion_labels))
+                              if motion_labels else None)
         self.min_conf, self.aspect = min_conf, aspect
         self.recent = deque(maxlen=smooth)
         self.buffer = deque()   # (time_s, landmarks or None)
@@ -99,7 +113,9 @@ class SignPredictor:
                 if path > self.motion_threshold:
                     p = self.motion_fn(sequence_features(seq)[None])[0]
                     k = int(np.argmax(p))
-                    result = {"prediction": self.motion_labels[k], "confidence": float(p[k]), "model": "motion"}
+                    # "other" = moving, but not a motion sign -> let the static model answer
+                    if self.motion_labels[k] != "other" and p[k] >= self.min_conf:
+                        result = {"prediction": self.motion_labels[k], "confidence": float(p[k]), "model": "motion"}
         if result is None:
             result = self.predict_landmarks(lm, handedness, aspect)
             result["model"] = "static"

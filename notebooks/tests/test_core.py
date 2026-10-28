@@ -217,6 +217,55 @@ def test_static_set_save_load_roundtrip():
         assert list(T.label) == ["A", "B"] and np.allclose(T.normalized(), S.normalized())
 
 
+def test_broken_tflite_is_refused():
+    """A .tflite file that outputs NaN (the v2.1.0 export bug) must fail loudly."""
+    import importlib
+    from signlens_core import inference as inf
+    importlib.reload(inf)
+
+    def fake_runtime(output):
+        class Interp:
+            def __init__(self, model_path): pass
+            def allocate_tensors(self): pass
+            def get_input_details(self): return [{"index": 0, "shape": np.array([1, sc.FEATURE_DIM])}]
+            def get_output_details(self): return [{"index": 1}]
+            def resize_tensor_input(self, *a): pass
+            def set_tensor(self, i, x): self.x = x
+            def invoke(self): pass
+            def get_tensor(self, i): return np.full((1, 3), output, np.float32)
+        mod = types.ModuleType("ai_edge_litert.interpreter"); mod.Interpreter = Interp
+        sys.modules["ai_edge_litert"] = types.ModuleType("ai_edge_litert")
+        sys.modules["ai_edge_litert.interpreter"] = mod
+
+    try:
+        fake_runtime(np.nan)
+        try:
+            inf.load_predict_fn("broken.tflite")
+            raise AssertionError("broken tflite was accepted")
+        except ValueError as e:
+            assert "NaN" in str(e)
+        fake_runtime(0.5)
+        f = inf.load_predict_fn("good.tflite")
+        assert f(np.zeros((4, sc.FEATURE_DIM))).shape == (4, 3)
+    finally:
+        sys.modules.pop("ai_edge_litert", None)
+        sys.modules.pop("ai_edge_litert.interpreter", None)
+        importlib.reload(inf)
+
+
+def test_motion_other_falls_back_to_static():
+    """When the hand moves but the motion model says 'other', show the static answer."""
+    with tempfile.TemporaryDirectory() as d:
+        lab = os.path.join(d, "s.json"); sc.save_labels(lab, ["A", "B"])
+        mlab = os.path.join(d, "m.json"); sc.save_labels(mlab, ["J", "Z", "other"])
+        pred = inference.SignPredictor(lambda x: np.tile([0.9, 0.1], (len(x), 1)), lab,
+                                       motion_model=lambda x: np.array([[0.05, 0.05, 0.9]]),
+                                       motion_labels=mlab, smooth=3)
+        out = [pred.update(fake_hand() + [0.03 * t, 0, 0], "Right", t / 30) for t in range(30)]
+        assert all(o["prediction"] in ("A", None) for o in out), {o["prediction"] for o in out}
+        assert out[-1]["prediction"] == "A" and out[-1]["model"] == "static"
+
+
 def test_predictor_with_dummy_model():
     with tempfile.TemporaryDirectory() as d:
         lab = os.path.join(d, "labels.json")
