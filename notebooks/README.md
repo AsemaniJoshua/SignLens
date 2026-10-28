@@ -127,6 +127,27 @@ ai-edge-litert
 
 Consider keeping the Gemini fallback only as an explicit, logged option. With the old 0.9 threshold, most answers came from Gemini rather than SignLens.
 
+## Re-export a model without retraining
+
+`.tflite` files made before the export fix (commit `50cb148`) are about **10 KB** and output NaN; the predictor refuses them. The `.keras` files from those runs are fine. To rebuild the `.tflite` files from them, run this in any Colab notebook after its Setup cell (no retraining, about 1 minute):
+
+```python
+import tempfile, numpy as np, tensorflow as tf, keras
+from signlens_core import inference
+for name in ("static_letters", "static_digits", "motion"):
+    k_path, t_path = f"{OUT_DIR}/{name}_model.keras", f"{OUT_DIR}/{name}_model.tflite"
+    if not os.path.exists(k_path):
+        continue
+    model = keras.models.load_model(k_path)
+    d = tempfile.mkdtemp() + "/saved_model"
+    model.export(d, format="tf_saved_model")
+    open(t_path, "wb").write(tf.lite.TFLiteConverter.from_saved_model(d).convert())
+    X = np.random.default_rng(0).normal(size=(50,) + tuple(model.input_shape[1:])).astype("float32")
+    k, l = model.predict(X, verbose=0), inference.load_predict_fn(t_path)(X)
+    print(f"{name}: {os.path.getsize(t_path)/1024:.0f} KB | max difference {np.abs(k - l).max():.1e} | "
+          f"same answer {np.mean(k.argmax(1) == l.argmax(1)):.0%}")
+```
+
 ## 6. Test locally
 
 ```bash

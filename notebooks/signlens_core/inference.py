@@ -40,11 +40,22 @@ def load_predict_fn(model_path: str):
         def f(x):
             x = np.asarray(x, np.float32)
             res = []
-            for row in x:  # tflite models are exported with batch size 1
+            for row in x:  # one sample at a time works for fixed and dynamic batch sizes
+                if tuple(inp["shape"]) != (1,) + row.shape:
+                    it.resize_tensor_input(inp["index"], (1,) + row.shape)
+                    it.allocate_tensors()
+                    inp.update(it.get_input_details()[0])
                 it.set_tensor(inp["index"], row[None])
                 it.invoke()
                 res.append(it.get_tensor(out["index"])[0])
             return np.stack(res)
+
+        # A broken export (e.g. one made before the v2.1 fix) outputs NaN. Refuse it loudly
+        # instead of returning meaningless predictions.
+        probe = np.zeros((1,) + tuple(int(d) for d in inp["shape"][1:]), np.float32)
+        if np.isnan(f(probe)).any():
+            raise ValueError(f"{model_path} outputs NaN: this .tflite export is broken. "
+                             "Re-export it from the .keras file (see notebooks/README.md) or load the .keras file.")
         return f
     import keras
     m = keras.models.load_model(model_path, compile=False)
