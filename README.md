@@ -1,227 +1,236 @@
-# 🤟 SignLens: Real-Time Sign Language Translation & Gamified Learning Ecosystem
-## Master System Installation & Execution Guide for Academic Evaluators & Supervisors
+# SignLens
 
-Welcome to the **SignLens** research project repository! This document serves as a comprehensive, step-by-step guide designed specifically for academic supervisors, external evaluators, and non-developer users to run the full SignLens ecosystem locally from scratch.
+**Real-time sign language fingerspelling recognition, with a gamified learning app.**
+
+Point a phone camera at a hand and SignLens recognises the letter or number being signed, in a photo, an uploaded video, or a live camera stream. A mobile app combines this with lessons and quizzes for learning to sign, and an admin dashboard manages users and course content.
+
+SignLens is a final-year research project at AAMUSTED, Kumasi, Ghana. The current models recognise the **American Sign Language (ASL) manual alphabet**, which Ghanaian Sign Language (GSL) fingerspelling is strongly based on. Extending the data to GSL signers is ongoing work.
 
 ---
 
-## 📐 1. System Architecture Overview
+## Results
 
-SignLens is a decoupled, multi-tier microservices platform. The system consists of **four primary modules** that run together on your local machine:
+The recogniser was rebuilt in October 2026 (see [`AUDIT.md`](AUDIT.md) for why the first version failed). It is evaluated **on people and datasets it never saw during training**, which is how it performs for a new user.
 
+| Test | Accuracy |
+|---|---|
+| Unseen recordings (same people as in training) | **97.7%** |
+| **Completely new person or dataset** (mean of 5 sources) | **82.5%** |
+| The first version of the model, on a new signer | 6–17% |
+
+Accuracy on each unseen source:
+
+| Held-out source | Accuracy |
+|---|---|
+| ASL Alphabet Test (several people, real backgrounds) | 90.2% |
+| YouTube signer | 87.8% |
+| ASL Alphabet (Kaggle) | 80.2% |
+| Synthetic ASL Alphabet | 79.2% |
+| Webcam recordings | 75.2% |
+
+These figures cover the 24 letters that are held still (all except J and Z). The hardest letters are the closed-fist group (A, E, M, N, S, T), which differ only in where the thumb sits, and the pairs R/U, K/V and G/P.
+
+---
+
+## How it works
+
+```mermaid
+flowchart LR
+    App["Mobile app<br/>(Expo / React Native)"] -->|"login, history, lessons"| API["Backend gateway<br/>(Express, port 8001)"]
+    Admin["Admin dashboard<br/>(Vite + React, port 5173)"] --> API
+    API --> DB[("PostgreSQL")]
+    App -->|"photo, video, live frames"| ML["Model server<br/>(FastAPI, port 8000)"]
+    API -->|"API key"| ML
 ```
-                                  ┌──────────────────────────────────────────────────────────┐
-                                  │           4. ADMIN DASHBOARD (Vite React @ :5173)        │
-                                  │    - System Analytics, User & Course Management, Logs   │
-                                  └────────────────────────────┬─────────────────────────────┘
-                                                               │ HTTP REST API
-                                                               ▼
-┌──────────────────────────────┐  REST & WebSockets  ┌──────────────────────────────────────┐
-│  3. MOBILE APP (Expo RN)     ├────────────────────►│  2. BACKEND GATEWAY (Express @ :8001)  │
-│  - Real-Time Camera Scanner  │                     │  - Auth (JWT/bcrypt), SQL Database   │
-│  - Text/Voice to Sign Video  │                     │  - History Logging, LMS Content CRUD │
-│  - Gamified Interactive LMS  │                     └──────────────────┬───────────────────┘
-└──────────────────────────────┘                                        │ Private Loop + API Key
-                                                                        ▼
-                                                     ┌──────────────────────────────────────┐
-                                                     │  1. ML SERVER (FastAPI @ :8000)      │
-                                                     │  - MediaPipe Landmark Extractor      │
-                                                     │  - TensorFlow Stacked LSTM (.h5)     │
-                                                     └──────────────────────────────────────┘
-```
+
+**Recognising a sign:**
+
+1. **Find the hand.** [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) marks 21 points on the hand (wrist, knuckles, fingertips).
+2. **Describe its shape.** The points are centred on the wrist, scaled to the palm size, and left hands are mirrored. Backgrounds, lighting, skin tone, and where the hand is in the picture therefore don't matter. This gives 105 numbers per hand: finger positions, joint angles and fingertip distances.
+3. **Recognise it.**
+   - **Static model:** a small neural network for letters held still. A separate model handles numbers, because in ASL some letters and numbers share a handshape (O/0, V/2, W/6, F/9).
+   - **Motion model:** watches about 1.5 seconds of movement for J and Z, and is only used when the hand actually moves.
+   - **Live smoothing:** on the live camera, answers are steadied over a few frames so they don't flicker.
 
 ---
 
-## 🛠️ 2. Prerequisite Software Installation Guide (For Beginners)
+## Repository layout
 
-Before starting the application, ensure the following **four software packages** are installed on your host computer:
-
-### Step 2.1: Install Node.js (JavaScript Runtime)
-1. Download **Node.js v18 LTS or v20 LTS** from the official website: [https://nodejs.org/](https://nodejs.org/)
-2. Run the installer and click **Next** through all steps. Ensure **"Add to PATH"** is checked.
-3. Verify installation by opening **Command Prompt (cmd)** and running:
-   ```bash
-   node -v
-   npm -v
-   ```
-
-### Step 2.2: Install Python (Machine Learning Runtime)
-1. Download **Python 3.10.x** from [https://www.python.org/downloads/](https://www.python.org/downloads/)
-2. ⚠️ **CRITICAL STEP:** On the very first screen of the Python installer, check the box that says **"Add python.exe to PATH"**.
-3. Complete the installation. Verify in Command Prompt:
-   ```bash
-   python --version
-   pip --version
-   ```
-
-### Step 2.3: Install XAMPP (Local Database Server)
-1. Download **XAMPP for Windows** (with Apache & MySQL) from [https://www.apachefriends.org/](https://www.apachefriends.org/)
-2. Install XAMPP to the default location (`C:\xampp`).
-3. Open the **XAMPP Control Panel**, click **Start** next to **Apache** and **MySQL**.
-
-### Step 2.4: Install Expo Go App on Mobile Phone (Optional but Recommended)
-- For testing on a physical smartphone: Download the free **Expo Go** application from the **Google Play Store** (Android) or **Apple App Store** (iOS).
+| Folder | What it is |
+|---|---|
+| [`frontend/`](frontend/) | Mobile app: camera sign scanner, text/voice to sign, gamified lessons (Expo SDK 54) |
+| [`backend/`](backend/) | API gateway: accounts (JWT), history, lesson content (Express + PostgreSQL) |
+| [`admin/`](admin/) | Admin dashboard: analytics, users, courses, logs (Vite + React) |
+| [`model/model_endpoints/`](model/model_endpoints/) | Model server that recognises signs (FastAPI + MediaPipe + TFLite) |
+| [`model/model_endpoints/saved_models_v2/`](model/model_endpoints/saved_models_v2/) | The trained models used by the server |
+| [`notebooks/`](notebooks/) | Training pipeline, runs on Google Colab ([guide](notebooks/README.md)) |
+| [`AUDIT.md`](AUDIT.md) | Audit of the first version: why it failed, with evidence |
+| `model/` (other folders), `old/` | First-version training scripts and datasets, kept for reference |
 
 ---
 
-## 🚀 3. Master Quick-Start Execution Sequence
+## Running SignLens on your computer
 
-To evaluate the complete system locally, follow this exact step-by-step order:
+You need four programs running at the same time: the model server, the backend, the admin dashboard and the mobile app. Open a separate terminal for each.
 
-### ─────────────────────────────────────────────────────────────
-### STEP 1: Set Up Local Database (XAMPP / MySQL)
-### ─────────────────────────────────────────────────────────────
-1. Open XAMPP Control Panel and start **Apache** and **MySQL**.
-2. Open your web browser and go to: `http://localhost/phpmyadmin`
-3. Click on **Databases** (top tab), enter database name `signlens_mobile`, and click **Create**.
+### What to install first
 
----
+| Software | Version | Get it |
+|---|---|---|
+| Node.js | 18 or 20 LTS | [nodejs.org](https://nodejs.org/) |
+| Python | 3.11 | [python.org](https://www.python.org/downloads/) (on Windows, tick **"Add python.exe to PATH"**) |
+| PostgreSQL | 14 or newer | [postgresql.org](https://www.postgresql.org/download/) |
+| Expo Go (on your phone) | latest | Google Play / App Store |
 
-### ─────────────────────────────────────────────────────────────
-### STEP 2: Launch Machine Learning Inference Server (Port 8000)
-### ─────────────────────────────────────────────────────────────
-Open a new Command Prompt window and execute:
+### 1. Create the database
+
+Create an empty PostgreSQL database named `signlens_mobile`, either in pgAdmin or with:
+
 ```bash
-# 1. Navigate to ML model endpoints directory
+psql -U postgres -c "CREATE DATABASE signlens_mobile;"
+```
+
+### 2. Start the model server (port 8000)
+
+```bash
 cd model/model_endpoints
-
-# 2. Create a virtual environment
 python -m venv venv
-
-# 3. Activate virtual environment
-# On Windows:
-venv\Scripts\activate
-# On Mac/Linux:
-source venv/bin/activate
-
-# 4. Install ML dependencies
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # macOS / Linux
 pip install -r requirements.txt
-
-# 5. Start Python FastAPI Server
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
-✅ **Success Check:** Open `http://localhost:8000/docs` in your browser. You should see the interactive FastAPI Swagger interface.
 
----
+Open <http://localhost:8000/>. It should show `"status": "ok"` and the modes `letters` and `digits`. The first start downloads MediaPipe's hand model (about 8 MB), so it needs internet once. The interactive API documentation is at <http://localhost:8000/docs>.
 
-### ─────────────────────────────────────────────────────────────
-### STEP 3: Launch Node.js API Gateway Backend (Port 8001)
-### ─────────────────────────────────────────────────────────────
-Open a second Command Prompt window and execute:
+### 3. Start the backend (port 8001)
+
 ```bash
-# 1. Navigate to backend directory
 cd backend
-
-# 2. Install dependencies
 npm install
+copy .env.example .env         # Windows  (macOS / Linux: cp .env.example .env)
+```
 
-# 3. Create .env file (if not present)
-# Windows PowerShell command:
-copy .env.example .env
+Open `backend/.env` and set at least `PGPASSWORD` (your PostgreSQL password) and `SECRET_KEY` (any long random text). Then:
 
-# 4. Execute database migrations and seed default data
+```bash
 npm run migrate
 npm run seed
-
-# 5. Start Backend Gateway
 npm run dev
 ```
-✅ **Success Check:** Open `http://localhost:8001/api-docs` in your browser. You should see the Node.js API Swagger documentation.
 
----
+The backend API documentation is at <http://localhost:8001/docs>.
 
-### ─────────────────────────────────────────────────────────────
-### STEP 4: Launch Admin Web Dashboard (Port 5173)
-### ─────────────────────────────────────────────────────────────
-Open a third Command Prompt window and execute:
+### 4. Start the admin dashboard (port 5173)
+
 ```bash
-# 1. Navigate to admin directory
 cd admin
-
-# 2. Install dependencies
 npm install
-
-# 3. Start Vite dev server
 npm run dev
 ```
-✅ **Success Check:** Open `http://localhost:5173` in your browser to view the Admin Dashboard.
 
----
+Open <http://localhost:5173>.
 
-### ─────────────────────────────────────────────────────────────
-### STEP 5: Launch Mobile Client Application
-### ─────────────────────────────────────────────────────────────
-Open a fourth Command Prompt window and execute:
+### 5. Start the mobile app
+
+Your phone and computer must be on the **same Wi-Fi network**. Find your computer's IP address (`ipconfig` on Windows, `ifconfig` on macOS/Linux), for example `192.168.1.100`, and put it in `frontend/.env`:
+
+```env
+EXPO_PUBLIC_API_URL=http://192.168.1.100:8001/api/v1
+EXPO_PUBLIC_ML_API_URL=http://192.168.1.100:8000
+```
+
+Then:
+
 ```bash
-# 1. Navigate to frontend directory
 cd frontend
-
-# 2. Install dependencies
 npm install
-
-# 3. Start Expo development server
 npx expo start
 ```
-✅ **Testing Options:**
-- **On Physical Phone:** Scan the displayed QR Code using your phone camera (iOS) or the **Expo Go** app (Android). (Ensure your phone and PC are connected to the same Wi-Fi network).
-- **On Web Browser:** Press `w` in the terminal to launch the mobile layout in Google Chrome.
-- **On Android Emulator:** Press `a` in the terminal (requires Android Studio installed).
+
+Scan the QR code with Expo Go (Android) or the Camera app (iPhone). Press `w` to open it in a web browser instead.
 
 ---
 
-## 📁 4. Component README Directory Map
+## Model server API
 
-For specialized, deep-dive instructions for each individual module, refer to the dedicated README files in their respective folders:
+| Request | What it does |
+|---|---|
+| `POST /api/v1/predict?type=image` | Recognise a sign in a photo (multipart field `file`) |
+| `POST /api/v1/predict?type=video` | Recognise a sign in a short video |
+| `WS /api/v1/predict-stream?api_key=...&type=stream` | Live camera: send JPEG frames, receive one answer per frame |
 
-| Module Folder | Purpose | Link |
-| :--- | :--- | :--- |
-| **`model/`** | Machine Learning model training scripts, datasets, MediaPipe extraction & FastAPI server | [model/README.md](file:///c:/Users/JOSHUA%20ASEMANI/Music/SignLens/SignLens/model/README.md) |
-| **`backend/`** | Node.js Express Gateway proxy, MySQL/PostgreSQL ORM schemas, JWT auth & REST endpoints | [backend/README.md](file:///c:/Users/JOSHUA%20ASEMANI/Music/SignLens/SignLens/backend/README.md) |
-| **`frontend/`** | React Native (Expo SDK 54) mobile camera scanner, voice/text to sign & gamified LMS | [frontend/README.md](file:///c:/Users/JOSHUA%20ASEMANI/Music/SignLens/SignLens/frontend/README.md) |
-| **`admin/`** | Vite React administrative management web dashboard for analytics & LMS course editing | [admin/README.md](file:///c:/Users/JOSHUA%20ASEMANI/Music/SignLens/SignLens/admin/README.md) |
+Add `&mode=digits` to recognise numbers instead of letters. Every answer looks like:
 
----
+```json
+{ "prediction": "A", "confidence": 0.97, "fallback": false, "model_used": "SignLens-v2" }
+```
 
-## ❓ 5. Comprehensive Troubleshooting & Common Issues Guide
-
-### 🚨 Problem 1: "Python is not recognized as an internal or external command"
-* **Cause:** Python was installed without enabling "Add to PATH".
-* **Solution:** Uninstall Python, re-run the Python 3.10 installer, and check **"Add python.exe to PATH"** on the first screen. Restart Command Prompt.
-
-### 🚨 Problem 2: `ECONNREFUSED` or Database Error when starting Backend
-* **Cause:** MySQL / XAMPP or PostgreSQL database server is not running, or database `signlens_mobile` was not created.
-* **Solution:** 
-  1. Open XAMPP Control Panel and ensure **MySQL** is started.
-  2. Visit `http://localhost/phpmyadmin` and verify `signlens_mobile` database exists.
-  3. Re-run `npm run migrate` in `backend/`.
-
-### 🚨 Problem 3: Port Conflict Error (`EADDRINUSE: port 8000 or 8001 in use`)
-* **Cause:** Another program or zombie node/python process is occupying the port.
-* **Solution (Windows Command Prompt):**
-  ```cmd
-  # Find process ID on port 8000 or 8001
-  netstat -ano | findstr :8000
-  # Kill process by ID (replace <PID> with number found)
-  taskkill /PID <PID> /F
-  ```
-
-### 🚨 Problem 4: Mobile App says "Network Error" when scanning signs
-* **Cause:** The mobile app cannot reach your PC's local backend IP address.
-* **Solution:**
-  1. Find your PC's local IP address by running `ipconfig` in Command Prompt (e.g., `192.168.1.100`).
-  2. Open `frontend/.env` and update:
-     ```env
-     EXPO_PUBLIC_API_URL=http://192.168.1.100:8001/api/v1
-     EXPO_PUBLIC_WS_URL=ws://192.168.1.100:8001/api/v1
-     ```
-  3. Restart Expo: `npx expo start -c`
+If no hand is visible, `prediction` says so and `confidence` is 0. On the live stream, show a letter only when `"stable": true`.
 
 ---
 
-## 👥 6. Project Authors & Supervision
+## Training the models
 
-- **Gilbert Elikplim Kukah** (Index No: `5221040415`)
-- **Anthony Afriyie** (Index No: `5221040495`)
-- **Joshua Asemani** (Index No: `5221040452`)
-- **Supervisor:** Dr. Joshua Dagadu
-- **Institution:** Akenten Appiah-Menka University of Skills Training and Entrepreneurial Development (AAMUSTED), Kumasi, Ghana (July 2026).
+Training runs on Google Colab and saves everything to Google Drive. Full instructions are in [`notebooks/README.md`](notebooks/README.md).
+
+| Notebook | Purpose |
+|---|---|
+| `00_diagnose_old_models` | Shows, with numbers, why the first version failed |
+| `01_build_landmark_dataset` | Collects hand landmarks from all data sources |
+| `02_train_static_model` | Trains the letters model (and, on a second run, the numbers model) |
+| `03_train_motion_model` | Trains the J/Z motion model |
+| `04_image_cnn_baseline` | Optional photo-based model, for comparison |
+
+To use newly trained models, copy the `.tflite` and `_labels.json` files from `MyDrive/SignLens/models/` into `model/model_endpoints/saved_models_v2/`.
+
+---
+
+## Data sources
+
+| Source | Used for |
+|---|---|
+| Webcam recordings collected for this project (30 per letter, A–S) | Training and testing |
+| *ASL Manual Alphabet*, Start ASL (YouTube): one signer, front and side views | Training and testing (not redistributed) |
+| [ASL Alphabet](https://www.kaggle.com/datasets/grassknoted/asl-alphabet), Akash Nagaraj (Kaggle) | Training and testing |
+| [ASL Alphabet Test](https://www.kaggle.com/datasets/danrasband/asl-alphabet-test), Dan Rasband (Kaggle) | Training and testing |
+| [Synthetic ASL Alphabet](https://www.kaggle.com/datasets/lexset/synthetic-asl-alphabet), Lexset (Kaggle) | Training and testing |
+| Digit videos 0–10 recorded for this project | Numbers model |
+
+The recognition models are trained on hand landmark coordinates only: 21 points per hand, with no faces or photos. Only the optional comparison model (notebook 04) uses hand-cropped images.
+
+---
+
+## Known limitations
+
+- **J and Z:** the motion model works, but there are only 3 real clips so far. It needs about 20 clips each, from several people.
+- **Numbers:** the numbers model has learned from 11 short clips of one person, so treat it as a demo until more people are recorded.
+- **ASL, not yet GSL:** all training data is ASL. GSL handshapes still need to be confirmed with GSL signers and added.
+- **Closed-fist letters:** A, E, M, N, S and T are the most often confused, because the thumb is partly hidden from the camera.
+
+More recordings from more people will improve all four.
+
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `python` or `pip` is "not recognized" | Reinstall Python 3.11 and tick **"Add python.exe to PATH"**, then open a new terminal. |
+| Model server shows `"status": "models_missing"` | Make sure the `.tflite` and `_labels.json` files are in `model/model_endpoints/saved_models_v2/`. |
+| Backend fails with `ECONNREFUSED` | PostgreSQL isn't running, or the `signlens_mobile` database or the password in `backend/.env` is wrong. |
+| `EADDRINUSE` (port already in use) | Another program uses the port. On Windows: `netstat -ano \| findstr :8000`, then `taskkill /PID <number> /F`. |
+| The app shows "Network Error" | Check that the phone and computer are on the same Wi-Fi and that the IP addresses in `frontend/.env` are correct, then restart with `npx expo start -c`. |
+| Photo or video scanning can't reach the model server | `frontend/services/endpoints/predict.ts` currently sends photos and videos to a fixed address (`172.20.10.14:8000`). Change it to your computer's IP, or make it use `EXPO_PUBLIC_ML_API_URL`. |
+
+---
+
+## Team
+
+- **Gilbert Elikplim Kukah** (Index No. 5221040415)
+- **Anthony Afriyie** (Index No. 5221040495)
+- **Joshua Asemani** (Index No. 5221040452)
+
+**Supervisor:** Dr. Joshua Dagadu
+
+Akenten Appiah-Menka University of Skills Training and Entrepreneurial Development (AAMUSTED), Kumasi, Ghana, 2026.
